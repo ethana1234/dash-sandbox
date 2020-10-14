@@ -1,0 +1,147 @@
+import dash
+import dash_core_components as dcc
+import dash_html_components as html
+import pandas as pd
+import plotly.express as px
+import sys,requests,json,hashlib
+from requests.exceptions import HTTPError
+from bs4 import BeautifulSoup
+from datetime import datetime
+
+external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
+
+app = dash.Dash(__name__, external_stylesheets=external_stylesheets)
+
+all_data = []
+years = ['2020','2019','2018','2017']
+for year in years:
+    url = f'https://www.baseball-reference.com/teams/PHI/{year}-batting.shtml'
+    r = requests.get(url)
+    soup = BeautifulSoup(r.content, 'lxml')
+    table = soup.find('table', attrs=dict(id='team_batting'))
+    data = pd.read_html(str(table))[0]
+    data.drop(data[data['Name'] == 'Name'].index, inplace=True)
+    data = data[data['Rk'].notna()]
+    data.set_index('Rk', inplace=True)
+    data['Name'] = data['Name'].str.replace(r'[^a-zA-Z\s]', '')
+    data.drop(data[data['Pos'] == 'P'].index, inplace=True)
+    data['Year'] = year
+    data.loc[:, 'Age':'Year'] = data.loc[:, 'Age':'Year'].apply(pd.to_numeric)
+    all_data.append(data)
+df = pd.concat(all_data)
+stats = df.columns[5:12]
+
+app.layout = html.Div([
+    html.Div([
+
+        html.Div([
+            dcc.Dropdown(
+                id='crossfilter-xaxis-column',
+                options=[{'label': i, 'value': i} for i in stats],
+                value='AB'
+            )
+        ],
+        style={'width': '49%', 'display': 'inline-block'}),
+
+        html.Div([
+            dcc.Dropdown(
+                id='crossfilter-yaxis-column',
+                options=[{'label': i, 'value': i} for i in stats],
+                value='HR'
+            ),
+        ], style={'width': '49%', 'float': 'right', 'display': 'inline-block'})
+    ], style={
+        'borderBottom': 'thin lightgrey solid',
+        'backgroundColor': 'rgb(250, 250, 250)',
+        'padding': '10px 5px'
+    }),
+
+    html.Div([
+        dcc.Graph(
+            id='crossfilter-indicator-scatter',
+            hoverData={'points': [{'customdata': 'Bryce Harper'}]}
+        )
+    ], style={'width': '49%', 'display': 'inline-block', 'padding': '0 20'}),
+    
+    html.Div([
+        dcc.Graph(id='x-time-series'),
+        dcc.Graph(id='y-time-series'),
+    ], style={'display': 'inline-block', 'width': '49%'}),
+
+    html.Div(dcc.Slider(
+        id='crossfilter-year--slider',
+        min=df['Year'].min(),
+        max=df['Year'].max(),
+        value=df['Year'].max(),
+        marks={year: year for year in years},
+        step=None
+    ), style={'width': '49%', 'padding': '0px 20px 20px 20px'})
+])
+
+
+@app.callback(
+    dash.dependencies.Output('crossfilter-indicator-scatter', 'figure'),
+    [dash.dependencies.Input('crossfilter-xaxis-column', 'value'),
+     dash.dependencies.Input('crossfilter-yaxis-column', 'value'),
+     dash.dependencies.Input('crossfilter-year--slider', 'value')])
+def update_graph(xaxis_column_name, yaxis_column_name, year_value):
+    dff = df[df['Year'] == year_value]
+
+    fig = px.scatter(x=dff[xaxis_column_name],
+            y=dff[yaxis_column_name],
+            hover_name=dff['Name']
+            )
+
+    fig.update_traces(customdata=dff['Name'])
+
+    fig.update_xaxes(title=xaxis_column_name, type='linear')
+
+    fig.update_yaxes(title=yaxis_column_name, type='linear')
+
+    fig.update_layout(margin={'l': 40, 'b': 40, 't': 10, 'r': 0}, hovermode='closest')
+
+    return fig
+
+
+def create_time_series(dff, title, xaxis_column_name):
+
+    fig = px.scatter(dff, x='Year', y=xaxis_column_name)
+
+    fig.update_traces(mode='lines+markers')
+
+    fig.update_xaxes(showgrid=False, type='category', categoryorder='category ascending')
+
+    fig.update_yaxes(type='linear')
+
+    fig.add_annotation(x=0, y=0.85, xanchor='left', yanchor='bottom',
+                       xref='paper', yref='paper', showarrow=False, align='left',
+                       bgcolor='rgba(255, 255, 255, 0.5)', text=title)
+
+    fig.update_layout(height=225, margin={'l': 20, 'b': 30, 'r': 10, 't': 10})
+
+    return fig
+
+
+@app.callback(
+    dash.dependencies.Output('x-time-series', 'figure'),
+    [dash.dependencies.Input('crossfilter-indicator-scatter', 'hoverData'),
+     dash.dependencies.Input('crossfilter-xaxis-column', 'value')])
+def update_y_timeseries(hoverData, xaxis_column_name):
+    player_name = hoverData['points'][0]['customdata']
+    dff = df[df['Name'] == player_name]
+    title = f'<b>{player_name}</b><br>{xaxis_column_name}'
+    return create_time_series(dff, title, xaxis_column_name)
+
+
+@app.callback(
+    dash.dependencies.Output('y-time-series', 'figure'),
+    [dash.dependencies.Input('crossfilter-indicator-scatter', 'hoverData'),
+     dash.dependencies.Input('crossfilter-yaxis-column', 'value')])
+def update_x_timeseries(hoverData, yaxis_column_name):
+    player_name = hoverData['points'][0]['customdata']
+    dff = df[df['Name'] == player_name]
+    return create_time_series(dff, yaxis_column_name, yaxis_column_name)
+
+
+if __name__ == '__main__':
+    app.run_server(debug=True)
