@@ -8,9 +8,7 @@ from requests.exceptions import HTTPError
 from bs4 import BeautifulSoup
 from datetime import datetime
 
-external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
-
-app = dash.Dash(__name__, external_stylesheets=external_stylesheets)
+from app import app
 
 all_data = []
 years = ['2020','2019','2018','2017']
@@ -31,9 +29,9 @@ for year in years:
 df = pd.concat(all_data)
 stats = df.columns[5:12]
 
-app.layout = html.Div([
+layout = html.Div([
     html.Div([
-
+        html.H1('3 graphs'),
         html.Div([
             dcc.Dropdown(
                 id='crossfilter-xaxis-column',
@@ -77,7 +75,6 @@ app.layout = html.Div([
         step=None
     ), style={'width': '49%', 'padding': '0px 20px 20px 20px'})
 ])
-
 
 @app.callback(
     dash.dependencies.Output('crossfilter-indicator-scatter', 'figure'),
@@ -141,7 +138,3 @@ def update_x_timeseries(hoverData, yaxis_column_name):
     player_name = hoverData['points'][0]['customdata']
     dff = df[df['Name'] == player_name]
     return create_time_series(dff, yaxis_column_name, yaxis_column_name)
-
-
-if __name__ == '__main__':
-    app.run_server(debug=True)
